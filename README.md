@@ -84,7 +84,15 @@ pip install --upgrade azureml-sdk[notebooks,automl] azureml-dataprep
 https://github.com/konabuta/chainer_aml
 ```
 
+## 3. Azure ML service への接続
 
+```python
+ws = Workspace.get(
+    name='<ワークスペース名>',
+    subscription_id='<サブスクリプションID>',
+    resource_group='<リソースグループ名>'
+                   )
+```
 
 Copyright (c) Microsoft Corporation. All rights reserved.  
     
