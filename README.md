@@ -1,22 +1,28 @@
 # Azure Machine Learning service Chainer サンプルコード
 
-Azure Machine Learning service におけるChainerのサンプルコードをご紹介します。
+Azure Machine Learning service を使った Chainer のサンプルコードをご紹介します。
 
-[ローカル環境で学習](/Chainer-local)
+[ローカル環境で学習](/Chainer-local)  
+ローカル環境にChainerがインストールされている場合に実行してみてください
 
-[Machine Learning Computeで学習](/Chainer-remote)
+[Machine Learning Computeで学習](/Chainer-remote)  
+Machine Learning Compute (旧Batch AI) でのモデル学習を実行
 
-[Hyperdriveによるパラメータチューニング](/Chainer-hyperdrive)
+[Hyperdriveによるパラメータチューニング](/Chainer-hyperdrive)  
+Machine Learning Compute の仕組みを使った並列でハイパーパラメータのチューニングを実施
 
-[ChainerMN で分散学習](/Chainer-remote)
+[ChainerMN で分散学習](/Chainer-remote)  
+ChainerMNを利用して、複数サーバ・複数GPUで並列分散学習を実施
 
-[ChainerMN + Infiniband で分散学習](/Chainer-remote)
+[ChainerMN + Infiniband で分散学習](/Chainer-remote)  
+ChainerMNを利用して、複数サーバ・複数GPUで並列分散学習を実施 (Infiniband対応のVMを利用)
 
 
 
 
 
-# Azure Machine Learning service の作成と構成
+
+# Azure Machine Learning service のサービス作成と開発環境の構築
 
 ## 1. Azure Machine Learning ワークスペースの作成
 
