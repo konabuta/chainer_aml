@@ -2,7 +2,7 @@
 
 Azure Machine Learning service におけるChainerのサンプルコードをご紹介します。
 
-[ローカル環境で学習](../Chainer-local)
+[ローカル環境で学習](/Chainer-local)
 
 [Machine Learning Computeで学習](../Chainer-remote)
 
