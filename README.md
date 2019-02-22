@@ -4,13 +4,13 @@ Azure Machine Learning service におけるChainerのサンプルコードをご
 
 [ローカル環境で学習](/Chainer-local)
 
-[Machine Learning Computeで学習](../Chainer-remote)
+[Machine Learning Computeで学習](/Chainer-remote)
 
-[Hyperdriveによるパラメータチューニング](../Chainer-hyperdrive)
+[Hyperdriveによるパラメータチューニング](/Chainer-hyperdrive)
 
-[ChainerMN で分散学習](../Chainer-remote)
+[ChainerMN で分散学習](/Chainer-remote)
 
-[ChainerMN + Infiniband で分散学習](../Chainer-remote)
+[ChainerMN + Infiniband で分散学習](/Chainer-remote)
 
 
 
