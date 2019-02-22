@@ -50,6 +50,7 @@ https://docs.microsoft.com/ja-jp/azure/notebooks/create-clone-jupyter-notebooks#
 ローカル環境のセットアップ：  
 https://docs.microsoft.com/ja-jp/azure/machine-learning/service/how-to-configure-environment#local
 
+仮想Python環境の作成
 
 ```shell
 # create a new Conda environment with Python 3.6, NumPy, and Cython
@@ -61,6 +62,11 @@ conda activate myenv
 # On macOS run
 source activate myenv
 
+```
+
+Azure ML service Python SDK のインストール
+```shell
+pip install --upgrade azureml-sdk[notebooks,automl] azureml-dataprep
 ```
 
 
