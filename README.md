@@ -1,4 +1,4 @@
-# Azure Machine Learning service Chainer サンプルコード
+# Azure Machine Learning service Chainer サンプルコード(1.0.18)
 
 Azure Machine Learning service を使った Chainer のサンプルコードをご紹介します。
 
