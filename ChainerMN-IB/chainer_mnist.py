@@ -1,17 +1,16 @@
-
+#!/usr/bin/env python
 from __future__ import print_function
 
 import argparse
 import gzip
-import numpy as np
 import struct
-
+import numpy as np
 import chainer
 import chainer.functions as F
 import chainer.links as L
 from chainer import training
 from chainer.training import extensions
-from chainer.datasets import mnist, tuple_dataset
+from chainer.datasets import tuple_dataset
 
 import chainermn
 
@@ -30,7 +29,7 @@ class MLP(chainer.Chain):
         h1 = F.relu(self.l1(x))
         h2 = F.relu(self.l2(h1))
         return self.l3(h2)
-
+    
 def load_data(filename, label=False):
     with gzip.open(filename) as gz:
         struct.unpack('I', gz.read(4))
@@ -44,20 +43,21 @@ def load_data(filename, label=False):
             res = np.frombuffer(gz.read(n_items[0]), dtype=np.uint8)
             res = res.reshape(n_items[0], 1)
     return res
-    
+
 
 def main():
     parser = argparse.ArgumentParser(description='ChainerMN example: MNIST')
     parser.add_argument('--data-folder','-d',type=str, dest='data_folder',help='data folder mounting point')
+    
     parser.add_argument('--batchsize', '-b', type=int, default=100,
                         help='Number of images in each mini-batch')
     parser.add_argument('--communicator', type=str,
-                        default='hierarchical', help='Type of communicator')
+                        default='non_cuda_aware', help='Type of communicator')
     parser.add_argument('--epoch', '-e', type=int, default=20,
                         help='Number of sweeps over the dataset to train')
-    parser.add_argument('--gpu', '-g', action='store_true',
+    parser.add_argument('--gpu', '-g', default=True,
                         help='Use GPU')
-    parser.add_argument('--out', '-o', default='result',
+    parser.add_argument('--out', '-o', default='./output',
                         help='Directory to output the result')
     parser.add_argument('--resume', '-r', default='',
                         help='Resume the training from snapshot')
@@ -68,8 +68,9 @@ def main():
     # Prepare ChainerMN communicator.
 
     if args.gpu:
+        print("gpu using ...")
         if args.communicator == 'naive':
-            print("Error: 'naive' communicator does not support GPU.\n")
+            print('Error: \'naive\' communicator does not support GPU.\n')
             exit(-1)
         comm = chainermn.create_communicator(args.communicator)
         device = comm.intra_rank
@@ -104,30 +105,27 @@ def main():
     # Split and distribute the dataset. Only worker 0 loads the whole dataset.
     # Datasets of worker 0 are evenly split and distributed to all workers.
     if comm.rank == 0:
-        train, test = chainer.datasets.get_mnist()
+        #train, test = chainer.datasets.get_mnist()
+        X_train = load_data(os.path.join(args.data_folder, 'train-images.gz'), False) / 255.0
+        X_test = load_data(os.path.join(args.data_folder, 'test-images.gz'), False) / 255.0
+        y_train = load_data(os.path.join(args.data_folder, 'train-labels.gz'), True).reshape(-1)
+        y_test = load_data(os.path.join(args.data_folder, 'test-labels.gz'), True).reshape(-1)
+
+        # Datatype　変更
+        X_train  = np.float32(X_train)
+        X_test  = np.float32(X_test)
+        y_train  = np.int32(y_train)
+        y_test  = np.int32(y_test)
+
+        # tuple　作成
+        train = tuple_dataset.TupleDataset(X_train, y_train)
+        test  = tuple_dataset.TupleDataset(X_test, y_test)
+        
     else:
         train, test = None, None
-
-    # ストレージの設定
-    print('training dataset is stored here:', args.data_folder)
-
-    # ストレージからデータロード
-    X_train = load_data(os.path.join(args.data_folder, 'train-images.gz'), False) / 255.0
-    X_test = load_data(os.path.join(args.data_folder, 'test-images.gz'), False) / 255.0
-    y_train = load_data(os.path.join(args.data_folder, 'train-labels.gz'), True).reshape(-1)
-    y_test = load_data(os.path.join(args.data_folder, 'test-labels.gz'), True).reshape(-1)
-
-    # Datatype　変更
-    X_train  = np.float32(X_train)
-    X_test  = np.float32(X_test)
-    y_train  = np.int32(y_train)
-    y_test  = np.int32(y_test)
-
-    # tuple　作成
-    train = tuple_dataset.TupleDataset(X_train, y_train)
-    test  = tuple_dataset.TupleDataset(X_test, y_test)
-
-  
+        
+    train = chainermn.scatter_dataset(train, comm, shuffle=True)
+    test = chainermn.scatter_dataset(test, comm, shuffle=True)
 
     train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
     test_iter = chainer.iterators.SerialIterator(test, args.batchsize,

@@ -1,42 +1,34 @@
+#!/usr/bin/env python
+from __future__ import print_function
 
 import argparse
-
-import numpy as np
 import gzip
 import struct
-
+import numpy as np
 import chainer
-from chainer import backend
-from chainer import backends
-from chainer.backends import cuda
-from chainer import Function, gradient_check, report, training, utils, Variable
-from chainer import datasets, iterators, optimizers, serializers
-from chainer import Link, Chain, ChainList
 import chainer.functions as F
 import chainer.links as L
+from chainer import training
 from chainer.training import extensions
-from chainer.dataset import concat_examples
-from chainer.datasets import mnist, tuple_dataset
+from chainer.datasets import tuple_dataset
 
-from chainer.backends.cuda import to_cpu
-
-from azureml.core.run import Run
-run = Run.get_context()
+import chainermn
 
 
-class MyNetwork(Chain):
+class MLP(chainer.Chain):
 
-    def __init__(self, n_mid_units=100, n_out=10):
-        super(MyNetwork, self).__init__()
-        with self.init_scope():
-            self.l1 = L.Linear(None, n_mid_units)
-            self.l2 = L.Linear(n_mid_units, n_mid_units)
-            self.l3 = L.Linear(n_mid_units, n_out)
+    def __init__(self, n_units, n_out):
+        super(MLP, self).__init__(
+            # the size of the inputs to each layer will be inferred
+            l1=L.Linear(784, n_units),  # n_in -> n_units
+            l2=L.Linear(n_units, n_units),  # n_units -> n_units
+            l3=L.Linear(n_units, n_out),  # n_units -> n_out
+        )
 
-    def forward(self, x):
-        h = F.relu(self.l1(x))
-        h = F.relu(self.l2(h))
-        return self.l3(h)
+    def __call__(self, x):
+        h1 = F.relu(self.l1(x))
+        h2 = F.relu(self.l2(h1))
+        return self.l3(h2)
     
 def load_data(filename, label=False):
     with gzip.open(filename) as gz:
@@ -54,123 +46,113 @@ def load_data(filename, label=False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Chainer example: MNIST')
-    parser.add_argument('--data-folder','-d',type=str, dest='data_folder', 
-                        help='data folder mounting point')
+    parser = argparse.ArgumentParser(description='ChainerMN example: MNIST')
+    parser.add_argument('--data-folder','-d',type=str, dest='data_folder',help='data folder mounting point')
+    
     parser.add_argument('--batchsize', '-b', type=int, default=100,
                         help='Number of images in each mini-batch')
-    parser.add_argument('--epochs', '-e', type=int, default=20,
+    parser.add_argument('--communicator', type=str,
+                        default='non_cuda_aware', help='Type of communicator')
+    parser.add_argument('--epoch', '-e', type=int, default=20,
                         help='Number of sweeps over the dataset to train')
-    parser.add_argument('--output_dir', '-o', default='./outputs',
+    parser.add_argument('--gpu', '-g', default=True,
+                        help='Use GPU')
+    parser.add_argument('--out', '-o', default='./output',
                         help='Directory to output the result')
-    parser.add_argument('--gpu_id', '-g', default=0,
-                        help='ID of the GPU to be used. Set to -1 if you use CPU')
+    parser.add_argument('--resume', '-r', default='',
+                        help='Resume the training from snapshot')
+    parser.add_argument('--unit', '-u', type=int, default=1000,
+                        help='Number of units')
     args = parser.parse_args()
 
-    # Download the MNIST data if you haven't downloaded it yet
-    #train, test = datasets.mnist.get_mnist(withlabel=True, ndim=1)
-    
-    # ストレージの設定
-    print('training dataset is stored here:', args.data_folder)
+    # Prepare ChainerMN communicator.
 
-    # ストレージからデータロード
-    X_train = load_data(os.path.join(args.data_folder, 'train-images.gz'), False) / 255.0
-    X_test = load_data(os.path.join(args.data_folder, 'test-images.gz'), False) / 255.0
-    y_train = load_data(os.path.join(args.data_folder, 'train-labels.gz'), True).reshape(-1)
-    y_test = load_data(os.path.join(args.data_folder, 'test-labels.gz'), True).reshape(-1)
+    if args.gpu:
+        print("gpu using ...")
+        if args.communicator == 'naive':
+            print('Error: \'naive\' communicator does not support GPU.\n')
+            exit(-1)
+        comm = chainermn.create_communicator(args.communicator)
+        device = comm.intra_rank
+    else:
+        if args.communicator != 'naive':
+            print('Warning: using naive communicator '
+                  'because only naive supports CPU-only execution')
+        comm = chainermn.create_communicator('naive')
+        device = -1
 
-    # Datatype　変更
-    X_train  = np.float32(X_train)
-    X_test  = np.float32(X_test)
-    y_train  = np.int32(y_train)
-    y_test  = np.int32(y_test)
+    if comm.rank == 0:
+        print('==========================================')
+        print('Num process (COMM_WORLD): {}'.format(comm.size))
+        if args.gpu:
+            print('Using GPUs')
+        print('Using {} communicator'.format(args.communicator))
+        print('Num unit: {}'.format(args.unit))
+        print('Num Minibatch-size: {}'.format(args.batchsize))
+        print('Num epoch: {}'.format(args.epoch))
+        print('==========================================')
 
-    # tuple　作成
-    train = tuple_dataset.TupleDataset(X_train, y_train)
-    test  = tuple_dataset.TupleDataset(X_test, y_test)
+    model = L.Classifier(MLP(args.unit, 10))
+    if device >= 0:
+        chainer.cuda.get_device_from_id(device).use()
+        model.to_gpu()
 
-    
-    
-    gpu_id = args.gpu_id
-    batchsize = args.batchsize
-    epochs = args.epochs
-    run.log('Batch size', np.int(batchsize))
-    run.log('Epochs', np.int(epochs))
-
-    train_iter = iterators.SerialIterator(train, batchsize)
-    test_iter = iterators.SerialIterator(test, batchsize,
-                                         repeat=False, shuffle=False)
-
-    model = MyNetwork()
-
-    if gpu_id >= 0:
-        # Make a specified GPU current
-        chainer.backends.cuda.get_device_from_id(0).use()
-        model.to_gpu()  # Copy the model to the GPU
-
-    # Choose an optimizer algorithm
-    optimizer = optimizers.MomentumSGD(lr=0.01, momentum=0.9)
-
-    # Give the optimizer a reference to the model so that it
-    # can locate the model's parameters.
+    # Create a multi node optimizer from a standard Chainer optimizer.
+    optimizer = chainermn.create_multi_node_optimizer(
+        chainer.optimizers.Adam(), comm)
     optimizer.setup(model)
 
-    while train_iter.epoch < epochs:
-        # ---------- One iteration of the training loop ----------
-        train_batch = train_iter.next()
-        image_train, target_train = concat_examples(train_batch, gpu_id)
+    # Split and distribute the dataset. Only worker 0 loads the whole dataset.
+    # Datasets of worker 0 are evenly split and distributed to all workers.
+    if comm.rank == 0:
+        #train, test = chainer.datasets.get_mnist()
+        X_train = load_data(os.path.join(args.data_folder, 'train-images.gz'), False) / 255.0
+        X_test = load_data(os.path.join(args.data_folder, 'test-images.gz'), False) / 255.0
+        y_train = load_data(os.path.join(args.data_folder, 'train-labels.gz'), True).reshape(-1)
+        y_test = load_data(os.path.join(args.data_folder, 'test-labels.gz'), True).reshape(-1)
 
-        # Calculate the prediction of the network
-        prediction_train = model(image_train)
+        # Datatype　変更
+        X_train  = np.float32(X_train)
+        X_test  = np.float32(X_test)
+        y_train  = np.int32(y_train)
+        y_test  = np.int32(y_test)
 
-        # Calculate the loss with softmax_cross_entropy
-        loss = F.softmax_cross_entropy(prediction_train, target_train)
+        # tuple　作成
+        train = tuple_dataset.TupleDataset(X_train, y_train)
+        test  = tuple_dataset.TupleDataset(X_test, y_test)
+        
+    else:
+        train, test = None, None
+        
+    train = chainermn.scatter_dataset(train, comm, shuffle=True)
+    test = chainermn.scatter_dataset(test, comm, shuffle=True)
 
-        # Calculate the gradients in the network
-        model.cleargrads()
-        loss.backward()
+    train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
+    test_iter = chainer.iterators.SerialIterator(test, args.batchsize,
+                                                 repeat=False, shuffle=False)
 
-        # Update all the trainable parameters
-        optimizer.update()
-        # --------------------- until here ---------------------
+    updater = training.StandardUpdater(train_iter, optimizer, device=device)
+    trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=args.out)
 
-        # Check the validation accuracy of prediction after every epoch
-        if train_iter.is_new_epoch:  # If this iteration is the final iteration of the current epoch
+    # Create a multi node evaluator from a standard Chainer evaluator.
+    evaluator = extensions.Evaluator(test_iter, model, device=device)
+    evaluator = chainermn.create_multi_node_evaluator(evaluator, comm)
+    trainer.extend(evaluator)
 
-            # Display the training loss
-            print('epoch:{:02d} train_loss:{:.04f} '.format(
-                train_iter.epoch, float(to_cpu(loss.array))), end='')
+    # Some display and output extensions are necessary only for one worker.
+    # (Otherwise, there would just be repeated outputs.)
+    if comm.rank == 0:
+        trainer.extend(extensions.dump_graph('main/loss'))
+        trainer.extend(extensions.LogReport())
+        trainer.extend(extensions.PrintReport(
+            ['epoch', 'main/loss', 'validation/main/loss',
+             'main/accuracy', 'validation/main/accuracy', 'elapsed_time']))
+        trainer.extend(extensions.ProgressBar())
 
-            test_losses = []
-            test_accuracies = []
-            while True:
-                test_batch = test_iter.next()
-                image_test, target_test = concat_examples(test_batch, gpu_id)
+    if args.resume:
+        chainer.serializers.load_npz(args.resume, trainer)
 
-                # Forward the test data
-                prediction_test = model(image_test)
-
-                # Calculate the loss
-                loss_test = F.softmax_cross_entropy(prediction_test, target_test)
-                test_losses.append(to_cpu(loss_test.array))
-
-                # Calculate the accuracy
-                accuracy = F.accuracy(prediction_test, target_test)
-                accuracy.to_cpu()
-                test_accuracies.append(accuracy.array)
-
-                if test_iter.is_new_epoch:
-                    test_iter.epoch = 0
-                    test_iter.current_position = 0
-                    test_iter.is_new_epoch = False
-                    test_iter._pushed_position = None
-                    break
-
-            val_accuracy = np.mean(test_accuracies)
-            print('val_loss:{:.04f} val_accuracy:{:.04f}'.format(
-                np.mean(test_losses), val_accuracy))
-
-            run.log("Accuracy", np.float(val_accuracy))
+    trainer.run()
 
 
 if __name__ == '__main__':
